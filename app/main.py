@@ -1,5 +1,5 @@
 from io import BytesIO
-
+from app.invoice import extract_invoice
 from fastapi import FastAPI, HTTPException, UploadFile
 from pypdf import PdfReader
 from starlette.concurrency import run_in_threadpool
@@ -53,11 +53,13 @@ def extract_pdf(data: bytes):
         ) from error
 
     has_text = any(page["text"] for page in pages)
+    combined_text = "\n".join(page["text"] for page in pages)
 
     return {
         "page_count": len(pages),
         "status": "text_extracted" if has_text else "ocr_required",
         "pages": pages,
+        "invoice": extract_invoice(combined_text) if has_text else None,
     }
 
 
