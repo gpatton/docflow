@@ -4,14 +4,16 @@ from decimal import Decimal
 
 
 def extract_invoice(text: str) -> dict:
-    """Extract labelled fields without guessing missing values."""
+    """Extract labelled fields from PDF text or OCR output."""
 
     def find(pattern: str):
         match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         return match.group(1).strip() if match else None
 
     def iso_date(label: str):
-        value = find(rf"^{label}:\s*(\d{{4}}-\d{{2}}-\d{{2}})\s*$")
+        value = find(
+            rf"\b{label}:[ \t]*(\d{{4}}-\d{{2}}-\d{{2}})\b"
+        )
         if value is None:
             return None
         try:
@@ -21,20 +23,35 @@ def extract_invoice(text: str) -> dict:
 
     def amount(label: str):
         value = find(
-            rf"^{label}:\s*EUR[ \t]+(\d+(?:\.\d{{2}})?)\s*$"
+            rf"\b{label}:\s*EUR[ \t]+"
+            rf"(\d+(?:\.\d{{2}})?)(?![\d.,])"
         )
         return Decimal(value) if value is not None else None
+
+    # This layout places the supplier name below the Supplier heading.
+    supplier = find(
+        r"^Supplier\b[^\n]*\n(?:[ \t]*\n)*([^\n]+)"
+    )
+    if supplier:
+        supplier = re.split(
+            r"\b(?:Invoice number|Invoice date|Due date|Currency):",
+            supplier,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip() or None
 
     subtotal = amount("Subtotal")
     vat = amount(r"VAT[ \t]*\(\d+(?:\.\d+)?%\)")
     total = amount("Total due")
 
     fields = {
-        "supplier": find(r"^Supplier[ \t]*\n([^\n]+)"),
-        "invoice_number": find(r"^Invoice number:[ \t]*([^\n]+)"),
+        "supplier": supplier,
+        "invoice_number": find(
+            r"\bInvoice number:[ \t]*([A-Z0-9][A-Z0-9._/-]*)"
+        ),
         "invoice_date": iso_date("Invoice date"),
         "due_date": iso_date("Due date"),
-        "currency": find(r"^Currency:[ \t]*([A-Z]{3})[ \t]*$"),
+        "currency": find(r"\bCurrency:[ \t]*([A-Z]{3})\b"),
         "subtotal": str(subtotal) if subtotal is not None else None,
         "vat": str(vat) if vat is not None else None,
         "total": str(total) if total is not None else None,
@@ -47,7 +64,7 @@ def extract_invoice(text: str) -> dict:
         totals_match = subtotal + vat == total
 
     return {
-        "method": "labelled_text_rules_v1",
+        "method": "labelled_text_rules_v2",
         "fields": fields,
         "validation": {
             "missing_fields": missing,

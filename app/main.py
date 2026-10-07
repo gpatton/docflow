@@ -3,7 +3,7 @@ from app.invoice import extract_invoice
 from fastapi import FastAPI, HTTPException, UploadFile
 from pypdf import PdfReader
 from starlette.concurrency import run_in_threadpool
-
+from app.ocr import ocr_page
 
 app = FastAPI(
     title="DocFlow",
@@ -36,14 +36,23 @@ def extract_pdf(data: bytes):
                 detail=f"PDFs must contain at most {MAX_PAGES} pages.",
             )
 
-        pages = [
-            {
-                "page_number": number,
-                "text": (page.extract_text() or "").strip(),
-            }
-            for number, page in enumerate(reader.pages, start=1)
-        ]
+        pages = []
 
+        for number, page in enumerate(reader.pages, start=1):
+            text = (page.extract_text() or "").strip()
+            method = "pdf_text"
+
+            if not text:
+                text = ocr_page(data, number)
+                method = "ocr"
+
+            pages.append(
+                {
+                    "page_number": number,
+                    "text": text,
+                    "extraction_method": method,
+                }
+            )
     except HTTPException:
         raise
     except Exception as error:
@@ -57,7 +66,7 @@ def extract_pdf(data: bytes):
 
     return {
         "page_count": len(pages),
-        "status": "text_extracted" if has_text else "ocr_required",
+        "status": "text_extracted" if has_text else "no_text_found",
         "pages": pages,
         "invoice": extract_invoice(combined_text) if has_text else None,
     }
