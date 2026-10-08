@@ -101,6 +101,74 @@ export default function App() {
     }
   }
 
+  async function approveInvoice() {
+    if (busy || saving || invoiceStatus !== 'draft') return
+    if (!window.confirm(
+      'Approve this invoice? Its fields will become read-only.',
+    )) return
+
+    setSaving(true)
+    setError('')
+    setNotice('')
+
+    try {
+      const saveResponse = await fetch(
+        activeId ? `/api/invoices/${activeId}` : '/api/invoices',
+        {
+          method: activeId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename,
+            fields: Object.fromEntries(
+              fields.map(([key]) => [key, draft[key] || null]),
+            ),
+          }),
+        },
+      )
+      const saved = await saveResponse.json()
+      if (!saveResponse.ok) {
+        throw new Error(
+          typeof saved.detail === 'string'
+            ? saved.detail
+            : 'Could not save the invoice before approval.',
+        )
+      }
+
+      setActiveId(saved.id)
+      setInvoiceStatus(saved.status)
+      setSavedInvoices((previous) => [
+        saved,
+        ...previous.filter((invoice) => invoice.id !== saved.id),
+      ])
+
+      const response = await fetch(`/api/invoices/${saved.id}/approve`, {
+        method: 'POST',
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        const validationErrors = data.detail?.errors
+        throw new Error(
+          Array.isArray(validationErrors)
+            ? `Draft saved, but approval failed: ${validationErrors.join(' ')}`
+            : typeof data.detail === 'string'
+              ? data.detail
+              : 'Draft saved, but approval could not be completed.',
+        )
+      }
+
+      setInvoiceStatus(data.status)
+      setSavedInvoices((previous) => [
+        data,
+        ...previous.filter((invoice) => invoice.id !== data.id),
+      ])
+      setNotice('Invoice approved. Its fields are now read-only.')
+    } catch (failure) {
+      setError(failure.message || 'Could not approve the invoice.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function openInvoice(id) {
     if (busy || saving) return
     if ((result || activeId) && !window.confirm(
@@ -333,8 +401,9 @@ export default function App() {
                       : 'Subtotal + VAT does not match the total.'}
                 </p>
                 <p className="muted">
-                  Review required. Save your changes before leaving this
-                  page. Approval will be added next.
+                  {invoiceStatus === 'approved'
+                    ? 'Approved invoice. Fields are read-only.'
+                    : 'Review all fields before approval. You can save an incomplete draft.'}
                 </p>
               </div>
 
@@ -344,6 +413,16 @@ export default function App() {
                 onClick={saveDraft}
               >
                 {saving ? 'Working…' : 'Save draft'}
+              </button>
+
+              <button
+                type="button"
+                disabled={busy || saving || invoiceStatus !== 'draft'}
+                onClick={approveInvoice}
+              >
+                {invoiceStatus === 'approved'
+                  ? 'Approved'
+                  : 'Approve invoice'}
               </button>
 
               {result && <details>

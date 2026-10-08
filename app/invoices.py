@@ -104,3 +104,45 @@ def update_invoice(invoice_id: UUID, draft: InvoiceDraft):
                 invoice_id,
             ),
         ).fetchone()
+
+
+@router.post("/{invoice_id}/approve")
+def approve_invoice(invoice_id: UUID):
+    from app.validation import validate_approval
+
+    with get_connection() as connection:
+        invoice = connection.execute(
+            "SELECT * FROM invoices WHERE id = %s FOR UPDATE",
+            (invoice_id,),
+        ).fetchone()
+
+        if invoice is None:
+            raise HTTPException(status_code=404, detail="Invoice not found.")
+
+        if invoice["status"] != "draft":
+            raise HTTPException(
+                status_code=409,
+                detail="Invoice is already approved.",
+            )
+
+        errors = validate_approval(invoice["fields"])
+        if errors:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Invoice cannot be approved.",
+                    "errors": errors,
+                },
+            )
+
+        return connection.execute(
+            """
+            UPDATE invoices
+            SET status = 'approved',
+                approved_at = NOW(),
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+            """,
+            (invoice_id,),
+        ).fetchone()
