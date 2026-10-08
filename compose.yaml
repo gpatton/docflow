@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: docflow
+      POSTGRES_USER: docflow
+      POSTGRES_PASSWORD: ${DOCFLOW_DB_PASSWORD:?Set DOCFLOW_DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:55434:5432"
+    volumes:
+      - docflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docflow -d docflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  docflow-postgres-data:

@@ -5,11 +5,25 @@ from pypdf import PdfReader
 from starlette.concurrency import run_in_threadpool
 from app.ocr import ocr_page
 
+from contextlib import asynccontextmanager
+from app.database import initialize_database
+from app.invoices import router as invoices_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await run_in_threadpool(initialize_database)
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="DocFlow",
     description="Local invoice document processing.",
     version="0.1.0",
 )
+
+app.include_router(invoices_router)
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 25

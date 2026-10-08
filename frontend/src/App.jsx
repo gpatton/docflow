@@ -29,6 +29,109 @@ export default function App() {
   const [draft, setDraft] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [savedInvoices, setSavedInvoices] = useState([])
+  const [activeId, setActiveId] = useState(null)
+  const [filename, setFilename] = useState('')
+  const [invoiceStatus, setInvoiceStatus] = useState('draft')
+  const [saving, setSaving] = useState(false)
+  const [loadingInvoices, setLoadingInvoices] = useState(true)
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadInvoices() {
+      try {
+        const response = await fetch('/api/invoices')
+        if (!response.ok) throw new Error('Could not load saved invoices.')
+        const data = await response.json()
+        if (!cancelled) setSavedInvoices(data)
+      } catch (failure) {
+        if (!cancelled) setError(failure.message)
+      } finally {
+        if (!cancelled) setLoadingInvoices(false)
+      }
+    }
+
+    loadInvoices()
+    return () => { cancelled = true }
+  }, [])
+
+  async function saveDraft() {
+    if (busy || saving || invoiceStatus !== 'draft') return
+
+    setSaving(true)
+    setError('')
+    setNotice('')
+
+    try {
+      const response = await fetch(
+        activeId ? `/api/invoices/${activeId}` : '/api/invoices',
+        {
+          method: activeId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename,
+            fields: Object.fromEntries(
+              fields.map(([key]) => [key, draft[key] || null]),
+            ),
+          }),
+        },
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(
+          typeof data.detail === 'string'
+            ? data.detail
+            : 'The draft could not be saved. Check the field lengths.',
+        )
+      }
+
+      setActiveId(data.id)
+      setInvoiceStatus(data.status)
+      setSavedInvoices((previous) => [
+        data,
+        ...previous.filter((invoice) => invoice.id !== data.id),
+      ])
+      setNotice('Draft saved.')
+    } catch (failure) {
+      setError(failure.message || 'Could not save the draft.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function openInvoice(id) {
+    if (busy || saving) return
+    if ((result || activeId) && !window.confirm(
+      'Open this saved invoice? Any unsaved edits in the current review will be lost.',
+    )) return
+
+    setSaving(true)
+    setError('')
+    setNotice('')
+
+    try {
+      const response = await fetch(`/api/invoices/${id}`)
+      const data = await response.json()
+      if (!response.ok) throw new Error('Could not open the saved invoice.')
+
+      setFile(null)
+      setPreviewUrl('')
+      setResult(null)
+      setActiveId(data.id)
+      setFilename(data.filename)
+      setInvoiceStatus(data.status)
+      setDraft(Object.fromEntries(
+        fields.map(([key]) => [key, data.fields[key] ?? '']),
+      ))
+      setNotice('Saved invoice opened.')
+    } catch (failure) {
+      setError(failure.message || 'Could not open the invoice.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!file) return
@@ -42,6 +145,10 @@ export default function App() {
   function selectFile(event) {
     const selected = event.target.files?.[0] || null
 
+    setActiveId(null)
+    setFilename(selected?.name || '')
+    setInvoiceStatus('draft')
+    setNotice('')
     setFile(selected)
     setPreviewUrl('')
     setResult(null)
@@ -58,6 +165,9 @@ export default function App() {
       return
     }
 
+    setActiveId(null)
+    setInvoiceStatus('draft')
+    setNotice('')
     setBusy(true)
     setError('')
     setResult(null)
@@ -120,9 +230,9 @@ export default function App() {
           type="file"
           accept=".pdf,application/pdf"
           onChange={selectFile}
-          disabled={busy}
+          disabled={busy || saving}
         />
-        <button disabled={!file || busy} type="submit">
+        <button disabled={!file || busy || saving} type="submit">
           {busy ? 'Extracting…' : 'Extract invoice'}
         </button>
         <p>Up to 10 MiB and 25 pages. Scanned pages may take longer.</p>
@@ -130,6 +240,31 @@ export default function App() {
 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p role="status">Processing your document…</p>}
+      {notice && <p role="status">{notice}</p>}
+
+      <section className="panel">
+        <h2>Saved invoices</h2>
+        {loadingInvoices ? (
+          <p>Loading saved invoices…</p>
+        ) : savedInvoices.length === 0 ? (
+          <p>No saved invoices yet.</p>
+        ) : (
+          <ul>
+            {savedInvoices.map((invoice) => (
+              <li key={invoice.id}>
+                <button
+                  type="button"
+                  disabled={busy || saving}
+                  onClick={() => openInvoice(invoice.id)}
+                >
+                  {invoice.fields.invoice_number || invoice.filename}
+                  {' · '}{invoice.status}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <div className="workspace">
         <section className="panel">
@@ -149,18 +284,20 @@ export default function App() {
 
         <section className="panel">
           <h2>Review extracted fields</h2>
-          {!result ? (
+          {!result && !activeId ? (
             <p className="empty">Extract an invoice to begin your review.</p>
           ) : (
             <>
-              <p className="summary">
+              <p className="filename">{filename}</p>
+              <p>Status: {invoiceStatus}</p>
+              {result && <p className="summary">
                 {result.page_count} page(s) ·{' '}
                 {[...new Set(
                   result.pages.map((page) => page.extraction_method),
                 )].join(', ')}
-              </p>
+              </p>}
 
-              {result.status === 'no_text_found' && (
+              {result?.status === 'no_text_found' && (
                 <p className="error">No readable text was found.</p>
               )}
 
@@ -170,6 +307,7 @@ export default function App() {
                     {label}
                     <input
                       type={key.endsWith('_date') ? 'date' : 'text'}
+                      disabled={busy || saving || invoiceStatus !== 'draft'}
                       value={draft[key] || ''}
                       onChange={(event) => setDraft({
                         ...draft,
@@ -195,19 +333,27 @@ export default function App() {
                       : 'Subtotal + VAT does not match the total.'}
                 </p>
                 <p className="muted">
-                  Review required. Edits are held in this page only;
-                  saving and approval will be added next.
+                  Review required. Save your changes before leaving this
+                  page. Approval will be added next.
                 </p>
               </div>
 
-              <details>
+              <button
+                type="button"
+                disabled={busy || saving || invoiceStatus !== 'draft'}
+                onClick={saveDraft}
+              >
+                {saving ? 'Working…' : 'Save draft'}
+              </button>
+
+              {result && <details>
                 <summary>Show extracted text</summary>
                 <pre>
                   {result.pages.map((page) =>
                     `Page ${page.page_number}\n${page.text}`,
                   ).join('\n\n')}
                 </pre>
-              </details>
+              </details>}
             </>
           )}
         </section>
