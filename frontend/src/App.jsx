@@ -36,6 +36,35 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [loadingInvoices, setLoadingInvoices] = useState(true)
   const [notice, setNotice] = useState('')
+  const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [historyVersion, setHistoryVersion] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+
+    setHistory([])
+    setHistoryError('')
+    setHistoryLoading(Boolean(activeId))
+    if (!activeId) return
+
+    async function loadHistory() {
+      try {
+        const response = await fetch(`/api/invoices/${activeId}/history`)
+        if (!response.ok) throw new Error('Could not load invoice history.')
+        const data = await response.json()
+        if (!cancelled) setHistory(data)
+      } catch (failure) {
+        if (!cancelled) setHistoryError(failure.message)
+      } finally {
+        if (!cancelled) setHistoryLoading(false)
+      }
+    }
+
+    loadHistory()
+    return () => { cancelled = true }
+  }, [activeId, historyVersion])
 
   useEffect(() => {
     let cancelled = false
@@ -93,6 +122,7 @@ export default function App() {
         data,
         ...previous.filter((invoice) => invoice.id !== data.id),
       ])
+      setHistoryVersion((version) => version + 1)
       setNotice('Draft saved.')
     } catch (failure) {
       setError(failure.message || 'Could not save the draft.')
@@ -135,6 +165,7 @@ export default function App() {
       }
 
       setActiveId(saved.id)
+      setHistoryVersion((version) => version + 1)
       setInvoiceStatus(saved.status)
       setSavedInvoices((previous) => [
         saved,
@@ -161,6 +192,7 @@ export default function App() {
         data,
         ...previous.filter((invoice) => invoice.id !== data.id),
       ])
+      setHistoryVersion((version) => version + 1)
       setNotice('Invoice approved. Its fields are now read-only.')
     } catch (failure) {
       setError(failure.message || 'Could not approve the invoice.')
@@ -424,6 +456,53 @@ export default function App() {
                   ? 'Approved'
                   : 'Approve invoice'}
               </button>
+
+              {activeId && (
+                <section aria-label="Invoice review history">
+                  <h3>Review history</h3>
+                  {historyLoading ? (
+                    <p role="status">Loading history…</p>
+                  ) : historyError ? (
+                    <p className="error" role="alert">{historyError}</p>
+                  ) : history.length === 0 ? (
+                    <p>No history recorded for this invoice yet.</p>
+                  ) : (
+                    <ol>
+                      {history.map((entry) => (
+                        <li key={entry.id}>
+                          <strong>
+                            {entry.action === 'created'
+                              ? 'Draft created'
+                              : entry.action === 'approved'
+                                ? 'Invoice approved'
+                                : 'Draft corrected'}
+                          </strong>
+                          {' · '}
+                          <time dateTime={entry.created_at}>
+                            {new Date(entry.created_at).toLocaleString()}
+                          </time>
+                          {entry.action === 'updated' && (
+                            <ul>
+                              {Object.entries(entry.changes).map(
+                                ([key, change]) => (
+                                  <li key={key}>
+                                    {fields.find(([name]) => name === key)?.[1]
+                                      || key}
+                                    {': '}
+                                    {change.before ?? '(empty)'}
+                                    {' → '}
+                                    {change.after ?? '(empty)'}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              )}
 
               {result && <details>
                 <summary>Show extracted text</summary>

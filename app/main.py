@@ -13,6 +13,8 @@ from app.invoices import router as invoices_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await run_in_threadpool(initialize_database)
+    from app.database import initialize_history
+    await run_in_threadpool(initialize_history)
     yield
 
 

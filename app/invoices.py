@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from psycopg.types.json import Jsonb
 
 from app.database import get_connection
+from app.history import field_changes, record_history
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
@@ -34,7 +35,7 @@ class InvoiceDraft(BaseModel):
 @router.post("", status_code=201)
 def create_invoice(draft: InvoiceDraft):
     with get_connection() as connection:
-        return connection.execute(
+        invoice = connection.execute(
             """
             INSERT INTO invoices (id, filename, fields)
             VALUES (%s, %s, %s)
@@ -46,6 +47,12 @@ def create_invoice(draft: InvoiceDraft):
                 Jsonb(draft.fields.model_dump()),
             ),
         ).fetchone()
+
+        record_history(connection, invoice["id"], "created", {
+            "filename": {"before": None, "after": invoice["filename"]},
+            "fields": {"before": None, "after": invoice["fields"]},
+        })
+        return invoice
 
 
 @router.get("")
@@ -78,7 +85,7 @@ def get_invoice(invoice_id: UUID):
 def update_invoice(invoice_id: UUID, draft: InvoiceDraft):
     with get_connection() as connection:
         invoice = connection.execute(
-            "SELECT status FROM invoices WHERE id = %s FOR UPDATE",
+            "SELECT * FROM invoices WHERE id = %s FOR UPDATE",
             (invoice_id,),
         ).fetchone()
 
@@ -91,7 +98,19 @@ def update_invoice(invoice_id: UUID, draft: InvoiceDraft):
                 detail="Only draft invoices can be edited.",
             )
 
-        return connection.execute(
+        changes = field_changes(
+            invoice["fields"], draft.fields.model_dump()
+        )
+        if invoice["filename"] != draft.filename:
+            changes["filename"] = {
+                "before": invoice["filename"],
+                "after": draft.filename,
+            }
+
+        if not changes:
+            return invoice
+
+        updated = connection.execute(
             """
             UPDATE invoices
             SET filename = %s, fields = %s, updated_at = NOW()
@@ -104,6 +123,9 @@ def update_invoice(invoice_id: UUID, draft: InvoiceDraft):
                 invoice_id,
             ),
         ).fetchone()
+
+        record_history(connection, invoice_id, "updated", changes)
+        return updated
 
 
 @router.post("/{invoice_id}/approve")
@@ -135,7 +157,7 @@ def approve_invoice(invoice_id: UUID):
                 },
             )
 
-        return connection.execute(
+        approved = connection.execute(
             """
             UPDATE invoices
             SET status = 'approved',
@@ -146,3 +168,30 @@ def approve_invoice(invoice_id: UUID):
             """,
             (invoice_id,),
         ).fetchone()
+
+        record_history(connection, invoice_id, "approved", {
+            "status": {"before": "draft", "after": "approved"},
+        })
+        return approved
+
+
+@router.get("/{invoice_id}/history")
+def get_invoice_history(invoice_id: UUID):
+    with get_connection() as connection:
+        invoice = connection.execute(
+            "SELECT id FROM invoices WHERE id = %s",
+            (invoice_id,),
+        ).fetchone()
+
+        if invoice is None:
+            raise HTTPException(status_code=404, detail="Invoice not found.")
+
+        return connection.execute(
+            """
+            SELECT id, invoice_id, action, changes, created_at
+            FROM invoice_history
+            WHERE invoice_id = %s
+            ORDER BY id
+            """,
+            (invoice_id,),
+        ).fetchall()

@@ -35,3 +35,26 @@ def initialize_database():
             )
             """
         )
+
+
+def initialize_history():
+    """Create storage for invoice review history."""
+    with get_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invoice_history (
+                id BIGSERIAL PRIMARY KEY,
+                invoice_id UUID NOT NULL REFERENCES invoices(id),
+                action TEXT NOT NULL
+                    CHECK (action IN ('created', 'updated', 'approved')),
+                changes JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS invoice_history_invoice_idx
+            ON invoice_history (invoice_id, id)
+            """
+        )
