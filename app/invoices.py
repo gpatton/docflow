@@ -30,27 +30,44 @@ class InvoiceDraft(BaseModel):
 
     filename: str = Field(min_length=1, max_length=255)
     fields: InvoiceFields
+    document_id: UUID | None = None
 
 
 @router.post("", status_code=201)
 def create_invoice(draft: InvoiceDraft):
     with get_connection() as connection:
+        if draft.document_id is not None:
+            document = connection.execute(
+                "SELECT id FROM documents WHERE id = %s FOR KEY SHARE",
+                (draft.document_id,),
+            ).fetchone()
+            if document is None:
+                raise HTTPException(
+                    status_code=422, detail="Original document not found."
+                )
+
         invoice = connection.execute(
             """
-            INSERT INTO invoices (id, filename, fields)
-            VALUES (%s, %s, %s)
+            INSERT INTO invoices (id, filename, fields, document_id)
+            VALUES (%s, %s, %s, %s)
             RETURNING *
             """,
             (
                 uuid4(),
                 draft.filename,
                 Jsonb(draft.fields.model_dump()),
+                draft.document_id,
             ),
         ).fetchone()
 
         record_history(connection, invoice["id"], "created", {
             "filename": {"before": None, "after": invoice["filename"]},
             "fields": {"before": None, "after": invoice["fields"]},
+            "document_id": {
+                "before": None,
+                "after": str(invoice["document_id"])
+                    if invoice["document_id"] else None,
+            },
         })
         return invoice
 
@@ -96,6 +113,15 @@ def update_invoice(invoice_id: UUID, draft: InvoiceDraft):
             raise HTTPException(
                 status_code=409,
                 detail="Only draft invoices can be edited.",
+            )
+
+        if (
+            "document_id" in draft.model_fields_set
+            and draft.document_id != invoice["document_id"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The original document link cannot be changed.",
             )
 
         changes = field_changes(

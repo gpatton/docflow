@@ -8,6 +8,11 @@ from app.ocr import ocr_page
 from contextlib import asynccontextmanager
 from app.database import initialize_database
 from app.invoices import router as invoices_router
+from app.documents import (
+    initialize_documents,
+    save_document,
+    router as documents_router,
+)
 
 
 @asynccontextmanager
@@ -15,6 +20,9 @@ async def lifespan(app: FastAPI):
     await run_in_threadpool(initialize_database)
     from app.database import initialize_history
     await run_in_threadpool(initialize_history)
+    await run_in_threadpool(initialize_documents)
+    from app.documents import initialize_document_links
+    await run_in_threadpool(initialize_document_links)
     yield
 
 
@@ -26,6 +34,7 @@ app = FastAPI(
 )
 
 app.include_router(invoices_router)
+app.include_router(documents_router)
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 25
@@ -110,4 +119,10 @@ async def extract_document(file: UploadFile):
             detail="Upload a PDF document.",
         )
 
-    return await run_in_threadpool(extract_pdf, data)
+    result = await run_in_threadpool(extract_pdf, data)
+    filename = (file.filename or "invoice.pdf").replace("\\", "/")
+    filename = filename.rsplit("/", 1)[-1][:255] or "invoice.pdf"
+    document_id = await run_in_threadpool(save_document, filename, data)
+    result["document_id"] = str(document_id)
+    result["filename"] = filename
+    return result

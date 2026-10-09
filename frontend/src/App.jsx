@@ -32,6 +32,7 @@ export default function App() {
   const [savedInvoices, setSavedInvoices] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [filename, setFilename] = useState('')
+  const [documentId, setDocumentId] = useState(null)
   const [invoiceStatus, setInvoiceStatus] = useState('draft')
   const [saving, setSaving] = useState(false)
   const [loadingInvoices, setLoadingInvoices] = useState(true)
@@ -101,6 +102,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename,
+            document_id: documentId,
             fields: Object.fromEntries(
               fields.map(([key]) => [key, draft[key] || null]),
             ),
@@ -149,6 +151,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename,
+            document_id: documentId,
             fields: Object.fromEntries(
               fields.map(([key]) => [key, draft[key] || null]),
             ),
@@ -221,6 +224,10 @@ export default function App() {
       setResult(null)
       setActiveId(data.id)
       setFilename(data.filename)
+      setDocumentId(data.document_id)
+      setPreviewUrl(
+        data.document_id ? `/api/documents/${data.document_id}/pdf` : '',
+      )
       setInvoiceStatus(data.status)
       setDraft(Object.fromEntries(
         fields.map(([key]) => [key, data.fields[key] ?? '']),
@@ -247,6 +254,7 @@ export default function App() {
 
     setActiveId(null)
     setFilename(selected?.name || '')
+    setDocumentId(null)
     setInvoiceStatus('draft')
     setNotice('')
     setFile(selected)
@@ -292,6 +300,8 @@ export default function App() {
       }
 
       setResult(data)
+      setDocumentId(data.document_id)
+      setFilename(data.filename)
       setDraft(
         Object.fromEntries(
           fields.map(([key]) => [key, data.invoice?.fields?.[key] ?? '']),
@@ -371,7 +381,7 @@ export default function App() {
           <h2>Original invoice</h2>
           {previewUrl ? (
             <>
-              <p className="filename">{file.name}</p>
+              <p className="filename">{filename}</p>
               <iframe title="Original invoice PDF" src={previewUrl} />
               <a href={previewUrl} target="_blank" rel="noreferrer">
                 Open PDF in a separate tab
