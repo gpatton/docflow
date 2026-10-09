@@ -18,6 +18,16 @@ It combines document processing with PostgreSQL persistence, server-side validat
 - Preserve original PDFs in PostgreSQL.
 - Run the complete application with Docker Compose.
 
+## Screenshots
+
+### Invoice review
+
+![Original PDF and editable invoice fields](docs/images/invoice-review.png)
+
+### Approval history
+
+![Approved invoice and saved correction history](docs/images/approval-history.png)
+
 ## Technology stack
 
 | Component | Technology |
